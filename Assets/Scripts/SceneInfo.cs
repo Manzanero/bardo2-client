@@ -3,6 +3,6 @@
 [Serializable] 
 public class SceneInfo
 {
-    public string name;
+    public string label;
     public string id;
 }

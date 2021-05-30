@@ -47,6 +47,8 @@ public class Tile : MonoBehaviour
     [Serializable]
     public class Model
     {
+        public int x;
+        public int y;
         public int th;
         public int v;
         public int a;
@@ -58,6 +60,8 @@ public class Tile : MonoBehaviour
     {
         return new Model
         {
+            x = x,
+            y = y,
             th = theme,
             v = int.Parse($"{top}{s}{e}{n}{w}"),
             a = altitude,

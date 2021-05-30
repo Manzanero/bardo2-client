@@ -17,16 +17,17 @@ public class Scene : MonoBehaviour
     public GameObject tilePrefab;
     public GameObject tokenPrefab;
     public GameObject auraPrefab;
-
+    
     public World world;
     public string id;
     public string label;
+    public bool loaded;
     public Chunk[,] chunks;
-    public Tile[,] tiles;
+    public Tile[,] tiles = new Tile[0, 0];
     public List<Wall> walls;
     public List<Token> tokens;
     public List<Aura> auras;
-    
+
     public Vector3 mousePosition;
     public bool mouseOverTile;
     public Tile mouseTile;
@@ -39,7 +40,7 @@ public class Scene : MonoBehaviour
     [Serializable]
     public class Property
     {
-        public string name; 
+        public string name;
         public List<string> values;
     }
 
@@ -48,17 +49,22 @@ public class Scene : MonoBehaviour
 
     public Tile Tile(int x, int y) => x >= Width || x < 0 || y >= Height || y < 0 ? null : tiles[x, y];
 
-    public IEnumerable<Tile> AdjacentTiles(Tile tile) => new[] 
-        {Tile(tile.x, tile.y - 1), Tile(tile.x - 1, tile.y), Tile(tile.x, tile.y + 1), Tile(tile.x + 1, tile.y)};
+    public IEnumerable<Tile> AdjacentTiles(Tile tile) => new[]
+    {
+        Tile(tile.x, tile.y - 1),
+        Tile(tile.x - 1, tile.y),
+        Tile(tile.x, tile.y + 1),
+        Tile(tile.x + 1, tile.y)
+    };
 
     public bool dirty;
-    
+
     private Camera _mainCamera;
     private List<Tile> _allTilesInLight = new List<Tile>();
     private List<Tile> _allTilesInVision = new List<Tile>();
     private List<Transform> _cachedTilesTransform = new List<Transform>();
     private List<Tile> _cachedTiles = new List<Tile>();
-    
+
     public static int tilesLayer;
     public static int blockerLayer;
     public static int mapLayerMask;
@@ -88,7 +94,7 @@ public class Scene : MonoBehaviour
         foreach (Transform child in aurasParent) Destroy(child.gameObject);
         foreach (Transform child in boundsParent) Destroy(child.gameObject);
     }
-    
+
     public void RefreshVision()
     {
         dirty = true;
@@ -96,9 +102,9 @@ public class Scene : MonoBehaviour
 
     private void Start()
     {
-        CreateBounds();
+        // CreateBounds();
     }
-    
+
     private void CreateBounds()
     {
         foreach (Transform b in boundsParent) Destroy(b.gameObject);
@@ -123,7 +129,7 @@ public class Scene : MonoBehaviour
     private void Update()
     {
         if (dirty) Refresh();
-        
+
         UpdateMouse();
     }
 
@@ -145,9 +151,9 @@ public class Scene : MonoBehaviour
             mouseOverTile = false;
             return;
         }
-        
+
         mouseOverTile = (bool) tile;
-        
+
         if (mouseOverTile)
         {
             mousePosition = rayCastHit.point;
@@ -157,18 +163,18 @@ public class Scene : MonoBehaviour
         {
             if (!Physics.Raycast(ray, out rayCastHit, 300f, mapLayerMask))
                 return;
-        
+
             mousePosition = rayCastHit.point;
             mouseTile = rayCastHit.transform.GetComponent<Tile>();
         }
-            
     }
-    
+
     private void UpdateVision()
     {
+        // return;
         if (World.playerIsMaster && !World.sharingPlayerVision)
             return;
-        
+
         _allTilesInLight.Clear();
         _allTilesInLight = tokens
             .Select(x => x.tilesInLight)
@@ -179,7 +185,7 @@ public class Scene : MonoBehaviour
             .Where(x => x.sharedVision)
             .Select(x => x.tilesInVision)
             .Aggregate(_allTilesInVision, (x, y) => x.Union(y).ToList());
-        
+
         var tilesToReveal = _allTilesInLight.Intersect(_allTilesInVision).ToList();
 
         foreach (var tile in tilesRevealed.Except(tilesToReveal))
@@ -188,24 +194,26 @@ public class Scene : MonoBehaviour
             foreach (var extraTiles in AdjacentTiles(tile)) extraTiles.chunk.dirty = true;
             tile.revealed = false;
         }
+
         foreach (var tile in tilesToReveal.Except(tilesRevealed))
         {
             tile.chunk.dirty = true;
             tile.explored = true;
             tile.revealed = true;
         }
+
         tilesRevealed = tilesToReveal;
     }
-    
+
     public IEnumerable<Tile> TilesInRange(Tile tile, float range)
     {
         // var a = System.DateTime.Now;
-        
+
         const int rayCount = 180;
         const float angleIncrease = 360f / rayCount;
         var angle = 360f;
         var origin = new Vector3(tile.x, -1.05f, tile.y);
-        var rayCastHits = new RaycastHit[(int) range * 2]; 
+        var rayCastHits = new RaycastHit[(int) range * 2];
 
         _cachedTilesTransform.Clear();
         _cachedTiles.Clear();
@@ -213,10 +221,10 @@ public class Scene : MonoBehaviour
         // get ground transforms in sight
         for (var i = 0; i <= rayCount; i++)
         {
-            var hits = Physics.RaycastNonAlloc(origin, VectorFromAngle(angle), 
+            var hits = Physics.RaycastNonAlloc(origin, VectorFromAngle(angle),
                 rayCastHits, range, mapLayerMask);
             var obstacleDistance = range;
-            
+
             for (var j = 0; j < hits; j++)
             {
                 var rayCastHitDistance = rayCastHits[j].distance;
@@ -224,40 +232,41 @@ public class Scene : MonoBehaviour
                     rayCastHits[j].transform.gameObject.layer == blockerLayer)
                     obstacleDistance = rayCastHitDistance;
             }
+
             for (var j = 0; j < hits; j++)
-                if (rayCastHits[j].distance < obstacleDistance) 
+                if (rayCastHits[j].distance < obstacleDistance)
                     _cachedTilesTransform.Add(rayCastHits[j].transform);
-            
+
             angle -= angleIncrease;
         }
-        
+
         _cachedTilesTransform = _cachedTilesTransform.Distinct().ToList();
-        
+
         // add current tile transform
         _cachedTilesTransform.Add(tile.transform);
-        
+
         // get tiles
         foreach (var t in _cachedTilesTransform
-            .Select(tileTransform => tileTransform.GetComponent<Tile>())) 
+            .Select(tileTransform => tileTransform.GetComponent<Tile>()))
             _cachedTiles.Add(t);
-        
+
         // remove duplicates
         _cachedTiles = _cachedTiles.Distinct().ToList();
         _cachedTiles.Remove(null);
-        
+
         // Debug.Log((System.DateTime.Now - a).TotalMilliseconds);
 
         return _cachedTiles;
     }
-    
+
     private static Vector3 VectorFromAngle(float angle)
     {
         var angleRad = Mathf.Deg2Rad * angle;
         return new Vector3(Mathf.Cos(angleRad), 0, Mathf.Sin(angleRad));
     }
-    
+
     #region Serialization
-    
+
     [Serializable]
     public class Model
     {
@@ -268,11 +277,11 @@ public class Scene : MonoBehaviour
         public List<Wall.Model> walls;
         public List<Token.Model> tokens;
     }
-    
+
     public Model Serialize()
     {
         var serializableTiles = new List<Tile.Model>();
-        for (var y = 0; y < Height; y += 1) 
+        for (var y = 0; y < Height; y += 1)
         for (var x = 0; x < Width; x += 1)
             serializableTiles.Add(tiles[x, y].Serializable());
 
@@ -283,7 +292,7 @@ public class Scene : MonoBehaviour
             size = new Vector2Int(Width, Height),
             tiles = serializableTiles,
             walls = walls.Select(wall => wall.Serializable()).ToList(),
-            tokens = tokens.Select(entity => entity.Serialize()).ToList()
+            tokens = tokens.Select(entity => entity.Serializable()).ToList()
         };
     }
 
@@ -298,12 +307,11 @@ public class Scene : MonoBehaviour
 
         world.NewChunks(width, height);
 
-        for (var i = 0; i < model.tiles.Count; i++)
+        foreach (var tileModel in model.tiles)
         {
-            var tileModel = model.tiles[i];
             var tile = Instantiate(tilePrefab, tilesParent).GetComponent<Tile>();
-            tile.x = i % width;
-            tile.y = i / width;
+            tile.x = tileModel.x;
+            tile.y = tileModel.y;
             tile.name = $"Tile-{tile.x}-{tile.y}";
             tile.chunk = chunks[tile.x / World.ChunkSize, tile.y / World.ChunkSize];
             tile.Deserialize(tileModel);
@@ -326,8 +334,9 @@ public class Scene : MonoBehaviour
             token.name = token.label;
             tokens.Add(token);
         }
-    }
-    
-    #endregion
 
+        CreateBounds();
+    }
+
+    #endregion
 }

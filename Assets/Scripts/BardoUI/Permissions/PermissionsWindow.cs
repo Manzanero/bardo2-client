@@ -24,7 +24,6 @@ namespace BardoUI.Permissions
         public Toggle healthToggleShow;
         public Toggle staminaToggleShow;
         public Toggle manaToggleShow;
-        public Button clearButton;
         public Button applyButton;
         
         // private GameMaster _gm;

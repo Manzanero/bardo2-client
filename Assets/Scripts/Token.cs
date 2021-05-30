@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using BardoUI;
 using OutlineEffect.OutlineEffect;
 using UnityEngine;
-using UnityEngine.Serialization;
 using UnityEngine.UI;
-using Object = UnityEngine.Object;
 
 public class Token : MonoBehaviour
 {
@@ -27,12 +27,17 @@ public class Token : MonoBehaviour
     public Draggable draggableBase;
     public OutlineMesh outlineSelected;
     public OutlineMesh outlineFocused;
-    
+
+    private static readonly string[] Permissions =
+    {
+        "NAME", "POSITION", "VISION", "CONTROL", "HEALTH", "STAMINA", "MANA"
+    };
+
     public Tile tile;
     public List<Tile> tilesInVision;
     public List<Tile> tilesInLight;
     public List<Aura> auras;
-    
+
     public bool dirty;
     public bool focused;
 
@@ -50,7 +55,7 @@ public class Token : MonoBehaviour
     public float bodySize = 1f;
     public Color bodyColor;
     public float bodyAlfa = 1f;
-    public string bodyResource;
+    public string bodyResource = "";
     public bool hasHealth;
     public float health;
     public float maxHealth = 100;
@@ -66,32 +71,9 @@ public class Token : MonoBehaviour
     public bool hasDarkVision;
     public bool hasLight;
     public float lightRange;
-    public List<Property> properties = new List<Property>();
 
-    [Serializable] public class Property
-    {
-        public TokenProperty key;
-        public string[] values;
+    public PropertyHolder properties = new PropertyHolder();
 
-        public string ToText() => key.type == 0 ? values[0] : 
-            throw new Exception($"Property '{key.label}' is not type 'text'. " +
-                                $"It is '{TokenPropertiesTypes.ToString(key.type)}'");
-        public float ToNumeric() => key.type == 1 ? float.Parse(values[0]) : 
-            throw new Exception($"Property '{key.label}' is not type 'numeric'. " +
-                                $"It is '{TokenPropertiesTypes.ToString(key.type)}'");
-        public float[] ToBar() => key.type == 2 ? new []{float.Parse(values[0]), float.Parse(values[1])} : 
-            throw new Exception($"Property '{key.label}' is not type 'bar'. " +
-                                $"It is '{TokenPropertiesTypes.ToString(key.type)}'");
-        public bool ToBoolean() => key.type == 3 ? values[0] == "true" : 
-            throw new Exception($"Property '{key.label}' is not type 'boolean'. " +
-                                $"It is '{TokenPropertiesTypes.ToString(key.type)}'");
-        public Color ToColor() => key.type == 4 ? 
-            new Color(float.Parse(values[0]), float.Parse(values[1]), float.Parse(values[2])) : 
-            throw new Exception($"Property '{key.label}' is not type 'color'. " +
-                                $"It is '{TokenPropertiesTypes.ToString(key.type)}'");
-    }
-    
-    
     public bool sharedName;
     public bool sharedPosition;
     public bool sharedVision;
@@ -102,17 +84,20 @@ public class Token : MonoBehaviour
 
     private Vector2 Offset
     {
-        get { var pos = transform.position; return new Vector2(pos.x - tile.x, pos.z - tile.y); }
+        get
+        {
+            var pos = transform.position;
+            return new Vector2(pos.x - tile.x, pos.z - tile.y);
+        }
     }
 
     public float rotation;
-    
+
     private Camera _mainCamera;
     private bool _inMovement;
-    private Object _cachedTile;
+    private Tile _cachedTile;
     private Vector3 _cachedPosition;
     private bool _resetVision;
-    private bool _cachedShadowed;
 
     private void Awake()
     {
@@ -129,9 +114,9 @@ public class Token : MonoBehaviour
     private void FixTile()
     {
         if (!ReferenceEquals(tile, null)) return;
-        
+
         var position = transform.position;
-        var scene =  GameObject.Find("World").GetComponent<World>().scene;
+        var scene = GameObject.Find("World").GetComponent<World>().scene;
         tile = scene.Tile(Mathf.RoundToInt(position.x), Mathf.RoundToInt(position.z));
         transform.parent = tile.chunk.scene.tokensParent;
         tile.chunk.scene.tokens.Add(this);
@@ -144,7 +129,7 @@ public class Token : MonoBehaviour
         FixTile();
 
         if (dirty) Refresh();
-        
+
         UpdateSelection();
         UpdateUi();
         UpdatePosition();
@@ -170,9 +155,13 @@ public class Token : MonoBehaviour
         baseMeshRenderer.material.color = baseColorAll;
         var bodyColorAll = new Color(bodyColor.r, bodyColor.g, bodyColor.b, bodyAlfa);
         bodyImage.color = bodyColorAll;
-        var bodySprite = bodyImage.sprite = World.GetResource<Sprite>(bodyResource);
-        bodyImage.rectTransform.sizeDelta = new Vector2(bodySprite.rect.width, bodySprite.rect.height);
-        bodyTransform.localScale = Vector3.one * bodySize / bodySprite.rect.height;
+        if (bodyResource != "")
+        {
+            var bodySprite = bodyImage.sprite = World.GetResource<Sprite>(bodyResource);
+            bodyImage.rectTransform.sizeDelta = new Vector2(bodySprite.rect.width, bodySprite.rect.height);
+            bodyTransform.localScale = Vector3.one * bodySize / bodySprite.rect.height;
+        }
+
         // UI
         healthImage.fillAmount = health / maxHealth;
         healthText.text = $"{health} / {maxHealth}";
@@ -188,17 +177,61 @@ public class Token : MonoBehaviour
         dirty = false;
     }
 
-    private void RefreshPermissions()
+    public void RefreshPermissions()
     {
-        if (!World.playerIsMaster || World.sharingPlayerVision) return;
-        
-        sharedName = true;
-        sharedPosition = true;
-        sharedVision = true;
-        sharedControl = true;
-        sharedHealth = true;
-        sharedStamina = true;
-        sharedMana = true;
+        if (World.playerIsMaster && !World.sharingPlayerVision)
+        {
+            sharedName = true;
+            sharedPosition = true;
+            sharedVision = true;
+            sharedControl = true;
+            sharedHealth = true;
+            sharedStamina = true;
+            sharedMana = true;
+            return;
+        }
+
+        sharedName = false;
+        sharedPosition = false;
+        sharedVision = false;
+        sharedControl = false;
+        sharedHealth = false;
+        sharedStamina = false;
+        sharedMana = false;
+
+        foreach (var permission in Permissions)
+        {
+            var property = World.instance.scene.properties.FirstOrDefault(x => x.name == permission);
+            if (property == null) continue;
+
+            var tokens = property.values;
+            if (!tokens.Contains(id)) continue;
+
+            switch (permission)
+            {
+                case "NAME":
+                    sharedName = true;
+                    break;
+                case "POSITION":
+                    sharedPosition = true;
+                    break;
+                case "VISION":
+                    sharedVision = true;
+                    break;
+                case "CONTROL":
+                    sharedControl = true;
+                    break;
+                case "HEALTH":
+                    sharedHealth = true;
+                    break;
+                case "STAMINA":
+                    sharedStamina = true;
+                    break;
+                case "MANA":
+                    sharedMana = true;
+                    break;
+            }
+        }
     }
 
     private void RefreshVision()
@@ -209,24 +242,33 @@ public class Token : MonoBehaviour
 
     private void UpdateSelection()
     {
-        if (!Clicked) return;
-
-        var scene = tile.chunk.scene;
-        if (!Input.GetKey(KeyCode.LeftControl) && !Input.GetKey(KeyCode.RightControl)) 
+        if (LeftClicked)
+        {
+            var scene = tile.chunk.scene;
+            if (!Input.GetKey(KeyCode.LeftControl) && !Input.GetKey(KeyCode.RightControl))
+                scene.selectedTokens.Clear();
+            if (scene.selectedTokens.Contains(this))
+                scene.selectedTokens.Remove(this);
+            else
+                scene.selectedTokens.Add(this);
+        }
+        else if (RightClicked)
+        {
+            var scene = tile.chunk.scene;
             scene.selectedTokens.Clear();
-        if (scene.selectedTokens.Contains(this))
-            scene.selectedTokens.Remove(this);
-        else
             scene.selectedTokens.Add(this);
+            NavigationPanel.instance.ShowTokenEditWindow();
+        }
+
     }
-    
+
     private void UpdateUi()
     {
         nameCanvas.gameObject.SetActive(hasLabel && sharedName && tile.explored);
         healthBar.SetActive(hasHealth && sharedHealth && tile.explored);
         staminaBar.SetActive(hasStamina && sharedStamina && tile.explored);
         manaBar.SetActive(hasMana && sharedMana && tile.explored);
-        
+
         var barsCanvasTransform = barsCanvas.transform;
         var nameCanvasTransform = nameCanvas.transform;
         var bodyCanvasTransform = bodyCanvas.transform;
@@ -246,7 +288,7 @@ public class Token : MonoBehaviour
         if (!hasBody)
         {
             barsCanvasTransform.localPosition = baseSize / 2 * screenForward + World.U * Vector3.up;
-            nameCanvasTransform.localPosition = - baseSize / 2 * screenForward;
+            nameCanvasTransform.localPosition = -baseSize / 2 * screenForward;
         }
         else
         {
@@ -259,19 +301,19 @@ public class Token : MonoBehaviour
 
     private void UpdatePosition()
     {
-        if (!sharedControl) 
+        if (!sharedControl)
             return;
-        
+
         if (Dragged)
         {
             _inMovement = true;
             baseMeshRenderer.material.color = new Color(baseColor.r, baseColor.g, baseColor.b, baseAlfa / 2);
             bodyImage.color = new Color(bodyColor.r, bodyColor.g, bodyColor.b, bodyAlfa / 2);
-            
-            var scene = tile.chunk.scene; 
+
+            var scene = tile.chunk.scene;
             var mouseTile = scene.mouseTile;
             if (!mouseTile || !mouseTile.walkable || !mouseTile.explored) return;
-            
+
             tile = mouseTile;
             ColliderEnabled = false;
             _cachedPosition = new Vector3(scene.mousePosition.x, tile.altitude * World.U, scene.mousePosition.z);
@@ -279,11 +321,11 @@ public class Token : MonoBehaviour
             if (Input.GetKey(KeyCode.LeftAlt))
                 transform.position = _cachedPosition;
             else
-                transform.position = new Vector3(Mathf.Round(_cachedPosition.x * 2) / 2, 
+                transform.position = new Vector3(Mathf.Round(_cachedPosition.x * 2) / 2,
                     tile.altitude * World.U, Mathf.Round(_cachedPosition.z * 2) / 2);
-            
+
             if (tile == _cachedTile) return;
-            
+
             _cachedTile = tile;
             RefreshVision();
         }
@@ -293,12 +335,19 @@ public class Token : MonoBehaviour
             ColliderEnabled = true;
             baseMeshRenderer.material.color = baseColor;
             bodyImage.color = bodyColor;
-                
+
             if (Input.GetKey(KeyCode.LeftAlt))
                 transform.position = new Vector3(_cachedPosition.x, tile.altitude * World.U, _cachedPosition.z);
             else
-                transform.position = new Vector3(Mathf.Round(_cachedPosition.x * 2) / 2, 
+                transform.position = new Vector3(Mathf.Round(_cachedPosition.x * 2) / 2,
                     tile.altitude * World.U, Mathf.Round(_cachedPosition.z * 2) / 2);
+
+            World.instance.RegisterAction(new Action
+            {
+                name = World.ActionNames.ChangeToken,
+                scene = World.instance.scene.id,
+                tokens = new List<Model> {Serializable()}
+            });
         }
     }
 
@@ -314,8 +363,8 @@ public class Token : MonoBehaviour
             tilesInVision.AddRange(scene.TilesInRange(tile, 50));
         else if (!hasVision && sharedControl)
             tilesInVision.Add(tile);
-        
-        tilesInLight.Clear(); 
+
+        tilesInLight.Clear();
         if (hasLight)
             tilesInLight.AddRange(scene.TilesInRange(tile, lightRange));
         else if (hasVision && sharedControl)
@@ -330,7 +379,7 @@ public class Token : MonoBehaviour
             bodyCanvas.gameObject.SetActive(false);
             return;
         }
-        
+
         if (sharedPosition)
         {
             baseMeshRenderer.gameObject.SetActive(hasBase && (tile.explored || sharedControl));
@@ -342,13 +391,9 @@ public class Token : MonoBehaviour
             bodyCanvas.gameObject.SetActive(false);
             return;
         }
-        
+
         if (Dragged) return;
 
-        // var tileRevealed = tile.revealed;
-        // if (_cachedShadowed == tileRevealed) return;
-        // _cachedShadowed = tileRevealed;
-        
         var tl = tile.revealed ? 1 : 0.5f;
         baseMeshRenderer.material.color = new Color(baseColor.r * tl, baseColor.g * tl, baseColor.b * tl, baseAlfa);
         bodyImage.color = new Color(bodyColor.r * tl, bodyColor.g * tl, bodyColor.b * tl, bodyAlfa);
@@ -360,18 +405,22 @@ public class Token : MonoBehaviour
         outlineSelected.enabled = tile.chunk.scene.selectedTokens.Contains(this) && !focus;
         outlineFocused.enabled = focus;
     }
-    
+
     private bool Dragged => draggableBase.dragged;
-    
+
     private bool MouseOver => draggableBase.MouseOver;
-    
-    private bool Clicked => MouseOver && Input.GetMouseButtonDown(0);
-    
-    private bool ColliderEnabled { set => baseMeshCollider.enabled = value; }
-    
-    
+
+    private bool LeftClicked => MouseOver && Input.GetMouseButtonDown(0);
+    private bool RightClicked => MouseOver && Input.GetMouseButtonDown(1);
+
+    private bool ColliderEnabled
+    {
+        set => baseMeshCollider.enabled = value;
+    }
+
+
     #region Serialization
-    
+
     [Serializable]
     public class Model
     {
@@ -408,8 +457,8 @@ public class Token : MonoBehaviour
         public Vector2 offset;
         public float rotation;
     }
-    
-    public Model Serialize()
+
+    public Model Serializable()
     {
         return new Model
         {
@@ -420,17 +469,17 @@ public class Token : MonoBehaviour
             initiative = initiative,
             isStatic = isStatic,
             hasBase = hasBase,
-            baseSize =  baseSize,
+            baseSize = baseSize,
             baseColor = baseColor,
             hasBody = hasBody,
             bodySize = bodySize,
             bodyColor = bodyColor,
             bodyResource = bodyResource,
             hasHealth = hasHealth,
-            health =  health,
+            health = health,
             maxHealth = maxHealth,
             hasStamina = hasStamina,
-            stamina =  stamina,
+            stamina = stamina,
             maxStamina = maxStamina,
             hasMana = hasMana,
             mana = mana,
@@ -441,7 +490,7 @@ public class Token : MonoBehaviour
             hasDarkVision = hasDarkVision,
             hasLight = hasLight,
             lightRange = lightRange,
-            
+
             position = new Vector2Int(tile.x, tile.y),
             offset = Offset,
             rotation = rotation,
@@ -479,11 +528,11 @@ public class Token : MonoBehaviour
         hasDarkVision = model.hasDarkVision;
         hasLight = model.hasLight;
         lightRange = model.lightRange;
-        
-        transform.position = new Vector3(tile.x + model.offset.x, tile.altitude, tile.y + model.offset.y); 
-        
+
+        transform.position = new Vector3(tile.x + model.offset.x, tile.altitude, tile.y + model.offset.y);
+
         Refresh();
     }
-    
+
     #endregion
 }
